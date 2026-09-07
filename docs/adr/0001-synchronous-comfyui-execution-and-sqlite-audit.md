@@ -1,0 +1,3 @@
+# Synchronous ComfyUI Execution and SQLite 3-Way Payload Logging
+
+Clients invoking `/z-image-turbo` expect a synchronous HTTP response containing the generated image rather than an asynchronous queue identifier. We decided to bridge ComfyUI's asynchronous `/prompt` queue by tracking execution completion through ComfyUI's WebSocket/History APIs, retrieving the resulting image artifact from `/view`, and returning it directly to the client while recording a 3-way payload audit (incoming client request, transformed ComfyUI workflow JSON, and final output status/latency) in an embedded SQLite database.
