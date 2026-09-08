@@ -66,6 +66,30 @@ Deno.test("Integration: Root redirect and Auth", async () => {
   assertEquals(Array.isArray(logsData.logs), true);
 });
 
+Deno.test("Integration: CORS headers on requests and preflight", async () => {
+  // Test OPTIONS preflight request
+  const optionsRes = await app.request("/z-image-turbo", {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://example.com",
+      "Access-Control-Request-Method": "POST",
+    },
+  });
+  assertEquals(optionsRes.status, 204);
+  assertEquals(optionsRes.headers.get("access-control-allow-origin"), "*");
+
+  // Test CORS header on standard response
+  const postRes = await app.request("/z-image-turbo", {
+    method: "POST",
+    headers: {
+      Origin: "https://random-client-app.com",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ prompt: "" }),
+  });
+  assertEquals(postRes.headers.get("access-control-allow-origin"), "*");
+});
+
 Deno.test("Integration: /z-image-turbo validation error logging", async () => {
   clearLogs();
 

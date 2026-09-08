@@ -1,4 +1,5 @@
 import { Hono } from "@hono/hono";
+import { cors } from "@hono/hono/cors";
 import { streamSSE } from "@hono/hono/streaming";
 import { config } from "./config.ts";
 import { clearLogs, getLogById, getLogs, insertLog } from "./db.ts";
@@ -15,6 +16,22 @@ import {
 import type { Context, Next } from "@hono/hono";
 
 export const app = new Hono();
+
+// Enable CORS for any origin
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["*"],
+    exposeHeaders: [
+      "Content-Length",
+      "Content-Disposition",
+      "X-ComfyUI-Prompt-Id",
+      "X-Latency-Ms",
+    ],
+  }),
+);
 
 // Auth helper verifying Basic Auth header, cookie, or token
 export function verifyCredentials(c: Context): boolean {
