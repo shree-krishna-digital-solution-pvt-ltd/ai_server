@@ -2,6 +2,7 @@ import { assertEquals, assertExists } from "@std/assert";
 import {
   escapeJsonString,
   generateRandomSeed,
+  transformFluxImageEdit,
   transformTemplateString,
   transformZImageTurbo,
 } from "./transformer.ts";
@@ -17,10 +18,8 @@ Deno.test("escapeJsonString", () => {
 
 Deno.test("generateRandomSeed", () => {
   const s1 = generateRandomSeed();
-  // const s2 = generateRandomSeed();
   assertExists(s1);
   assertEquals(typeof s1, "number");
-  // Seeds should be positive integers
   assertEquals(s1 >= 0, true);
 });
 
@@ -73,4 +72,28 @@ Deno.test("transformZImageTurbo works with actual template file", () => {
   // Node 57:3 is KSampler
   assertEquals(typeof workflow["57:3"].inputs.seed, "number");
   assertEquals(workflow["57:3"].inputs.seed, result.seed);
+});
+
+Deno.test("transformFluxImageEdit works with actual flux template file", () => {
+  const result = transformFluxImageEdit({
+    prompt: "Add a retro sunglasses accessory",
+    image1: "person_portrait.png",
+    image2: "sunglasses_ref.png",
+    seed: 987654321,
+  });
+
+  assertExists(result.workflowJson);
+  const workflow = result.workflowJson as Record<
+    string,
+    { inputs: Record<string, unknown> }
+  >;
+
+  // Node 76 is LoadImage 1
+  assertEquals(workflow["76"].inputs.image, "person_portrait.png");
+  // Node 81 is LoadImage 2
+  assertEquals(workflow["81"].inputs.image, "sunglasses_ref.png");
+  // Node 92:113 is CLIPTextEncode (Prompt)
+  assertEquals(workflow["92:113"].inputs.text, "Add a retro sunglasses accessory");
+  // Node 92:105 is RandomNoise
+  assertEquals(workflow["92:105"].inputs.noise_seed, 987654321);
 });

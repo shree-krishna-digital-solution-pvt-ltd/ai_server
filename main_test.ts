@@ -209,3 +209,154 @@ Deno.test(
     }
   },
 );
+
+Deno.test("Integration: /flux validation error logging", async () => {
+  clearLogs();
+
+  // Test missing images
+  const formData = new FormData();
+  formData.append("prompt", "Some edit prompt");
+  const badRes = await app.request("/flux", {
+    method: "POST",
+    body: formData,
+  });
+  assertEquals(badRes.status, 400);
+
+  const { logs } = getLogs();
+  assertEquals(logs.length, 1);
+  assertEquals(logs[0].status_code, 400);
+  assertEquals(logs[0].path, "/flux");
+  assertExists(logs[0].error);
+});
+
+Deno.test("Integration: Full /flux 2-image upload and execution flow", async () => {
+  clearLogs();
+
+  const mockImageBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const uploadedFilenames: string[] = [];
+  let mockPromptReceived: Record<string, unknown> | null = null;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    const urlStr =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    const url = new URL(urlStr);
+
+    // 1. Mock /upload/image
+    if (url.pathname === "/upload/image") {
+      const uploadName = `uploaded_${uploadedFilenames.length + 1}.png`;
+      uploadedFilenames.push(uploadName);
+      return Response.json({
+        name: uploadName,
+        subfolder: "",
+        type: "input",
+      });
+    }
+
+    // 2. Mock /prompt
+    if (url.pathname === "/prompt") {
+      if (init?.body && typeof init.body === "string") {
+        mockPromptReceived = JSON.parse(init.body);
+      }
+      return Response.json({
+        prompt_id: "flux-prompt-456",
+        number: 2,
+        node_errors: {},
+      });
+    }
+
+    // 3. Mock /history
+    if (url.pathname === "/history/flux-prompt-456") {
+      return Response.json({
+        "flux-prompt-456": {
+          status: { completed: true },
+          outputs: {
+            "94": {
+              images: [
+                { filename: "flux_output.png", subfolder: "", type: "output" },
+              ],
+            },
+          },
+        },
+      });
+    }
+
+    // 4. Mock /view
+    if (url.pathname === "/view") {
+      return new Response(mockImageBytes, {
+        headers: { "Content-Type": "image/png" },
+      });
+    }
+
+    return new Response("Not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const formData = new FormData();
+    const blob1 = new Blob(["fake-image-1"], { type: "image/png" });
+    const blob2 = new Blob(["fake-image-2"], { type: "image/png" });
+    formData.append("image1", blob1, "portrait.png");
+    formData.append("image2", blob2, "sunglasses.png");
+    formData.append("prompt", "Wear stylish sunglasses");
+
+    const res = await app.request("/flux", {
+      method: "POST",
+      body: formData,
+    });
+
+    assertEquals(res.status, 200);
+    assertEquals(res.headers.get("Content-Type"), "image/png");
+    const receivedBytes = new Uint8Array(await res.arrayBuffer());
+    assertEquals(receivedBytes, mockImageBytes);
+
+    // Verify 2 images were uploaded
+    assertEquals(uploadedFilenames.length, 2);
+
+    // Verify prompt workflow structure
+    assertExists(mockPromptReceived);
+    const promptObj = (mockPromptReceived as { prompt: Record<string, { inputs: Record<string, unknown> }> }).prompt;
+    assertEquals(promptObj["76"].inputs.image, "uploaded_1.png");
+    assertEquals(promptObj["81"].inputs.image, "uploaded_2.png");
+    assertEquals(promptObj["92:113"].inputs.text, "Wear stylish sunglasses");
+
+    // Verify SQLite 3-way log record
+    const { logs } = getLogs();
+    assertEquals(logs.length, 1);
+    const log = logs[0];
+    assertEquals(log.status_code, 200);
+    assertEquals(log.path, "/flux");
+
+    const clientReq = JSON.parse(log.client_request);
+    assertEquals(clientReq.prompt, "Wear stylish sunglasses");
+    assertEquals(clientReq.image1, "portrait.png");
+    assertEquals(clientReq.image2, "sunglasses.png");
+
+    const transformed = JSON.parse(log.transformed_payload!);
+    assertEquals(transformed["76"].inputs.image, "uploaded_1.png");
+    assertEquals(transformed["81"].inputs.image, "uploaded_2.png");
+
+    const destRes = JSON.parse(log.destination_response!);
+    assertEquals(destRes.prompt_id, "flux-prompt-456");
+    assertEquals(destRes.filename, "flux_output.png");
+
+    // Test Replay for Flux
+    const replayRes = await app.request(`/_api/replay/${log.id}`, {
+      method: "POST",
+      headers: { Authorization: getAuthHeader() },
+    });
+    assertEquals(replayRes.status, 200);
+
+    const afterReplay = getLogs();
+    assertEquals(afterReplay.total, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

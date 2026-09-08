@@ -7,18 +7,26 @@ export interface ZImageTurboInput {
   seed?: number;
 }
 
-let cachedTemplate: string | null = null;
-
-export function loadTemplate(templatePath = "./image_z_image_turbo.json"): string {
-  if (cachedTemplate) {
-    return cachedTemplate;
-  }
-  cachedTemplate = Deno.readTextFileSync(templatePath);
-  return cachedTemplate;
+export interface FluxImageEditInput {
+  image1: string;
+  image2: string;
+  prompt: string;
+  seed?: number;
 }
 
-export function setCachedTemplate(template: string | null): void {
-  cachedTemplate = template;
+const templateCache: Map<string, string> = new Map();
+
+export function loadTemplate(templatePath: string): string {
+  if (templateCache.has(templatePath)) {
+    return templateCache.get(templatePath)!;
+  }
+  const content = Deno.readTextFileSync(templatePath);
+  templateCache.set(templatePath, content);
+  return content;
+}
+
+export function clearTemplateCache(): void {
+  templateCache.clear();
 }
 
 /**
@@ -37,7 +45,7 @@ export function escapeJsonString(str: string): string {
 }
 
 /**
- * Transform template string by replacing {{field}} placeholders with actual values.
+ * Transform template string by replacing {{field}} placeholders with actual values for z-image-turbo.
  */
 export function transformTemplateString(
   templateContent: string,
@@ -80,4 +88,41 @@ export function transformZImageTurbo(
 ): { workflowJson: Record<string, unknown>; rawJsonString: string; seed: number } {
   const template = loadTemplate(templatePath);
   return transformTemplateString(template, params);
+}
+
+/**
+ * Transform the 2-image Flux image edit workflow.
+ */
+export function transformFluxImageEdit(
+  params: FluxImageEditInput,
+  templatePath = "./flux_image_edit.json",
+): { workflowJson: Record<string, unknown>; rawJsonString: string; seed: number } {
+  const template = loadTemplate(templatePath);
+  const prompt = params.prompt || "";
+  const image1 = params.image1 || "";
+  const image2 = params.image2 || "";
+  const seed = typeof params.seed === "number" && params.seed >= 0 ? params.seed : generateRandomSeed();
+
+  const escapedPrompt = escapeJsonString(prompt);
+  const escapedImage1 = escapeJsonString(image1);
+  const escapedImage2 = escapeJsonString(image2);
+
+  const transformed = template
+    .replace(/\{\{prompt\}\}/g, escapedPrompt)
+    .replace(/\{\{image1\}\}/g, escapedImage1)
+    .replace(/\{\{image2\}\}/g, escapedImage2)
+    .replace(/\{\{seed\}\}/g, String(seed));
+
+  let workflowJson: Record<string, unknown>;
+  try {
+    workflowJson = JSON.parse(transformed);
+  } catch (err) {
+    throw new Error(`Failed to parse transformed Flux ComfyUI workflow JSON: ${err}`);
+  }
+
+  return {
+    workflowJson,
+    rawJsonString: transformed,
+    seed,
+  };
 }

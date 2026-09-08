@@ -32,7 +32,7 @@ _Avoid_: Admin console, viewer
 The endpoint (`/z-image-turbo`) accepting `{ prompt, width, height }`, parameterizing the `z-image-turbo` workflow template, submitting to ComfyUI, awaiting completion, and returning raw binary image data (`image/png`).
 
 **`flux` Route**:
-The endpoint (`/flux`) reserved for multi-image workflow requests with image uploads forwarded to `/upload/image`.
+The endpoint (`/flux`) accepting 2 image files (`image1`, `image2`) and a `prompt` via multipart form-data, uploading the images to ComfyUI (`/upload/image`), parameterizing the `flux_image_edit.json` workflow template, awaiting execution, and returning the edited image binary (`image/png`).
 
 ### Operations & Behaviors
 
